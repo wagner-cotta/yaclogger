@@ -1,0 +1,41 @@
+name: SLASH COMMANDS PROCESSOR
+on:
+  issue_comment:
+    types: [created, edited]
+jobs:
+  process_command:
+    name: PROCESS COMMAND
+    runs-on: [self-hosted]
+    if: github.triggering_actor == 'wagnercotta'
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: SLASH COMMAND DISPATCH
+        uses: peter-evans/slash-command-dispatch@v4
+        with:
+          permission: write
+          issue-type: pull-request
+          commands: |
+            label
+            test
+          static-args: |
+            comment-id=${{ github.event.comment.id }}
+            object-id=${{ github.event.issue.number }}
+          token: ${{ secrets.RUNNER }}
+          reaction-token: ${{ secrets.RUNNER }}
+
+  refuse_command:
+    name: REFUSE COMMAND
+    runs-on: [self-hosted]
+    if: github.triggering_actor != 'wagnercotta'
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: REPLY COMMENT
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.RUNNER }}
+          comment-id: ${{ github.event.comment.id }}
+          reactions: "-1"

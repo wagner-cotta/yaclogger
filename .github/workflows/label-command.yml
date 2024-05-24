@@ -1,0 +1,25 @@
+name: LABEL COMMAND
+on:
+  repository_dispatch:
+    types: [label-command]
+jobs:
+  bump_command:
+    name: ADD LABEL TO PR
+    runs-on: [self-hosted]
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: ADD LABELS
+        uses: wagner-cotta/arsc-label@v1.0
+        with:
+          token: ${{ secrets.RUNNER }}
+          operation: ${{ github.event.client_payload.slash_command.args.unnamed.arg1 }}
+          labels: ${{ github.event.client_payload.slash_command.args.unnamed.arg2 }}
+          object-id: ${{ github.event.client_payload.slash_command.args.named.object-id }}
+      - name: REPLY COMMENT
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.RUNNER }}
+          comment-id: ${{ github.event.client_payload.slash_command.args.named.comment-id }}
+          reactions: "+1"

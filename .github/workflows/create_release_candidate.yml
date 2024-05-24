@@ -1,0 +1,143 @@
+name: CREATE RELEASE CANDIDATE
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - release_candidate
+
+jobs:
+  get_version:
+    name: GET VERSION FROM FILE
+    if: github.event.pull_request.merged == true && (contains(github.event.pull_request.labels.*.name, 'major') ||
+      contains(github.event.pull_request.labels.*.name, 'minor') ||
+      contains(github.event.pull_request.labels.*.name, 'patch')) ||
+      contains(github.event.pull_request.labels.*.name, 'release') ||
+      contains(github.event.pull_request.labels.*.name, 'common')
+    runs-on: [self-hosted]
+
+    permissions:
+      contents: read
+
+    outputs:
+      MAJOR: ${{ steps.read_version_variables.outputs.MAJOR }}
+      MINOR: ${{ steps.read_version_variables.outputs.MINOR }}
+      PATCH: ${{ steps.read_version_variables.outputs.PATCH }}
+
+    steps:
+      - name: CHECKOUT CODE
+        uses: actions/checkout@v4
+
+      - name: READ VERSION FROM FILE TO OUTPUT
+        id: read_version_variables
+        run: |
+          for line in $(cat .version); do echo "$line" >> "$GITHUB_OUTPUT"; done
+
+      - name: SHOW VERSION
+        run: |
+          echo "CURRENT VERSION: ${{ steps.read_version_variables.outputs.MAJOR }}.${{ steps.read_version_variables.outputs.MINOR }}.${{ steps.read_version_variables.outputs.PATCH }}"
+
+  bump_version:
+    name: BUMP VERSION
+    runs-on: [self-hosted]
+    if: github.event.pull_request.merged == true && (contains(github.event.pull_request.labels.*.name, 'major') ||
+      contains(github.event.pull_request.labels.*.name, 'minor') ||
+      contains(github.event.pull_request.labels.*.name, 'patch'))
+    needs:
+      - get_version
+
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ secrets.RUNNER }}
+      CMAJOR: ${{ needs.get_version.outputs.MAJOR }}
+      CMINOR: ${{ needs.get_version.outputs.MINOR }}
+      CPATCH: ${{ needs.get_version.outputs.PATCH }}
+
+    outputs:
+      MAJOR: ${{ steps.bump_version_variables.outputs.MAJOR }}
+      MINOR: ${{ steps.bump_version_variables.outputs.MINOR }}
+      PATCH: ${{ steps.bump_version_variables.outputs.PATCH }}
+
+    steps:
+      - name: CHECKOUT CODE
+        uses: actions/checkout@v4.1.6
+
+      - name: READ VERSION VARIABLES
+        run: |
+          echo "NMAJOR=$CMAJOR" >> "$GITHUB_ENV"
+          echo "NMINOR=$CMINOR" >> "$GITHUB_ENV"
+          echo "NPATCH=$CPATCH" >> "$GITHUB_ENV"
+
+      - name: INCREASE PATCH VERSION
+        if: contains(toJson(github.event.pull_request.labels.*.name), 'patch')
+        run: |
+          echo "NPATCH=$((NPATCH+1))" >> "$GITHUB_ENV"
+
+      - name: INCREASE MINOR VERSION
+        if: contains(toJson(github.event.pull_request.labels.*.name), 'minor')
+        run: |
+          echo "NMINOR=$((NMINOR+1))" >> "$GITHUB_ENV"
+
+      - name: INCREASE MAJOR
+        if: contains(toJson(github.event.pull_request.labels.*.name), 'major')
+        run: |
+          echo "NMAJOR=$((NMAJOR+1))" >> "$GITHUB_ENV"
+
+      - name: UPDATE VERSION VARIABLES
+        id: bump_version_variables
+        run: |
+          echo "MAJOR=${{ env.NMAJOR }}" >> "$GITHUB_OUTPUT"
+          echo "MINOR=${{ env.NMINOR }}" >> "$GITHUB_OUTPUT"
+          echo "PATCH=${{ env.NPATCH }}" >> "$GITHUB_OUTPUT"
+
+      - name: WRITE VERSION TO FILE
+        run: |
+          echo "MAJOR=${{ env.NMAJOR }}" > .version
+          echo "MINOR=${{ env.NMINOR }}" >> .version
+          echo "PATCH=${{ env.NPATCH }}" >> .version
+          echo "NEW VERSION: ${{ env.NMAJOR }}.${{ env.NMINOR }}.${{ env.NPATCH }}"
+
+      - name: SET VERSION TO TOML FILE
+        uses: jacobtomlinson/gha-find-replace@v3
+        with:
+          include: "pyproject.toml"
+          find: version = "${{ env.CMAJOR }}.${{ env.CMINOR }}.${{ env.CPATCH }}"
+          replace: version = "${{ env.NMAJOR }}.${{ env.NMINOR }}.${{ env.NPATCH }}"
+          regex: false
+
+      - name: SET VERSION TO SETUP FILE
+        uses: jacobtomlinson/gha-find-replace@v3
+        with:
+          include: setup.py
+          find: version="${{ env.CMAJOR }}.${{ env.CMINOR }}.${{ env.CPATCH }}"
+          replace: version="${{ env.NMAJOR }}.${{ env.NMINOR }}.${{ env.NPATCH }}"
+          regex: false
+
+      - name: COMMIT CHANGES
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "⬆ Bump to [${{ env.NMAJOR }}.${{ env.NMINOR }}.${{ env.NPATCH }}]"
+          branch: release_candidate
+
+  create_pr:
+    name: CREATE PR
+    runs-on: [self-hosted]
+    needs: get_version
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.RUNNER }}
+
+    steps:
+      - name: CREATE RELEASE PR
+        if: contains(github.event.pull_request.labels.*.name, 'release')
+        run: |
+          gh pr create -B main -H release_candidate --label 'release' --title '🔖[RELEASE][${{ needs.get_version.outputs.MAJOR }}.${{ needs.get_version.outputs.MINOR }}.${{ needs.get_version.outputs.PATCH }}] - ${{ github.event.pull_request.title }}' --body '${{ github.event.pull_request.body }}'
+
+      - name: CREATE COMMON PR
+        if: contains(github.event.pull_request.labels.*.name, 'common')
+        run: |
+          gh pr create -B main -H release_candidate --label 'common' --title '🚧[${{ needs.get_version.outputs.MAJOR }}.${{ needs.get_version.outputs.MINOR }}.${{ needs.get_version.outputs.PATCH }}] - ${{ github.event.pull_request.title }}' --body '${{ github.event.pull_request.body }}'

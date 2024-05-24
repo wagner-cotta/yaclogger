@@ -1,0 +1,52 @@
+name: TEST COMMAND
+on:
+  repository_dispatch:
+    types: [test-command]
+
+jobs:
+  test_source_code:
+    name: TEST SOURCE CODE
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        os: ["u20", "u22"]
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11", "3.12"]
+      fail-fast: false
+      max-parallel: 1
+    runs-on: [self-hosted]
+    container:
+      image: wagnercotta/runner:${{ matrix.os }}py${{ matrix.python-version }}
+    steps:
+      - name: CHECKOUT CODE
+        uses: actions/checkout@v4.1.6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: INSTALL DEPENDENCIES
+        run: |
+          python${{ matrix.python-version }} -m pip install --upgrade pip
+          pip3 install flake8 pytest
+          if [ -f requirements.txt ]; then pip3 install -r requirements.txt; fi
+
+      - name: LINT WITH FLAKE8
+        run: |
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: INSTALL PACKAGE
+        run: |
+          pip3 install -e .
+
+      - name: TESTING WITH PYTEST
+        run: |
+          python${{ matrix.python-version }} -m pytest -vv tests/
+
+      - name: REPLY COMMENT
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.RUNNER }}
+          comment-id: ${{ github.event.client_payload.slash_command.args.named.comment-id }}
+          reactions: +1
